@@ -1,93 +1,238 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-class ProjectDetailsScreen extends StatelessWidget {
-  // Мы будем передавать всю информацию о проекте в этот экран
+final supabase = Supabase.instance.client;
+
+class ProjectDetailsScreen extends StatefulWidget {
   final Map<String, dynamic> project;
-
   const ProjectDetailsScreen({super.key, required this.project});
+  @override
+  State<ProjectDetailsScreen> createState() => _ProjectDetailsScreenState();
+}
+
+class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
+  late final Future<List<Map<String, dynamic>>> _imagesFuture;
+  bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _imagesFuture = _getProjectImages();
+  }
+
+  Future<List<Map<String, dynamic>>> _getProjectImages() async {
+    try {
+      final response = await supabase
+          .from('project_images')
+          .select('image_url')
+          .eq('project_id', widget.project['id']);
+      return response;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // === ФИНАЛЬНАЯ ЛОГИКА УДАЛЕНИЯ ПРЯМО В КОДЕ ===
+  Future<void> _deleteProject() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final projectId = widget.project['id'];
+
+      // 1. Получаем список всех URL изображений проекта
+      final imagesResponse = await supabase
+          .from('project_images')
+          .select('image_url')
+          .eq('project_id', projectId);
+
+      // 2. Извлекаем из URL пути к файлам
+      final List<String> pathsToDelete = [];
+      for (final image in imagesResponse) {
+        final imageUrl = image['image_url'];
+        // Надежный способ извлечь путь из URL
+        final path = Uri.parse(imageUrl).pathSegments.sublist(5).join('/');
+        pathsToDelete.add(path);
+      }
+
+      // 3. Если есть что удалять, удаляем файлы из Storage
+      if (pathsToDelete.isNotEmpty) {
+        await supabase.storage.from('project_images').remove(pathsToDelete);
+      }
+
+      // 4. Удаляем саму запись о проекте из базы данных.
+      // ON DELETE CASCADE автоматически удалит все записи из 'project_images'.
+      await supabase.from('projects').delete().match({'id': projectId});
+
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Проект успешно удален')));
+        Navigator.of(context).pop(true);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка при удалении проекта: $e')),
+        );
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  void _showDeleteConfirmationDialog() {
+    // ... (этот метод остается без изменений) ...
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('Подтверждение'),
+          content: const Text(
+            'Вы уверены, что хотите удалить этот проект? Все связанные с ним изображения будут удалены безвозвратно.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Отмена'),
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+              },
+            ),
+            TextButton(
+              child: const Text('Удалить', style: TextStyle(color: Colors.red)),
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                _deleteProject();
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    // Для удобства вытащим вложенный объект с данными автора
-    final author = project['users'];
-    final imageUrl = project['image_url'];
+    // ... (build метод остается без изменений) ...
+    final currentUserId = supabase.auth.currentUser!.id;
+    final isAuthor = currentUserId == widget.project['user_id'];
 
     return Scaffold(
       appBar: AppBar(
-        // В заголовок вынесем название проекта
-        title: Text(project['title'] ?? 'Детали проекта'),
-      ),
-      body: ListView(
-        // Убираем внутренние отступы у ListView, чтобы картинка прилегала к краям
-        padding: EdgeInsets.zero,
-        children: [
-          // === Большое изображение проекта ===
-          if (imageUrl != null && imageUrl.isNotEmpty)
-            Image.network(
-              imageUrl,
-              // Можно задать высоту или использовать AspectRatio
-              height: 300,
-              width: double.infinity,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => const SizedBox(
-                height: 300,
-                child: Center(child: Icon(Icons.broken_image, size: 50)),
-              ),
+        title: Text(widget.project['title'] ?? 'Детали проекта'),
+        actions: [
+          if (isAuthor)
+            IconButton(
+              onPressed: _showDeleteConfirmationDialog,
+              icon: const Icon(Icons.delete_outline),
+              tooltip: 'Удалить проект',
             ),
-
-          // === Контент с отступами ===
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Название проекта
-                Text(
-                  project['title'] ?? 'Без названия',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
+        ],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.project['title'] ?? 'Без названия',
+                          style: Theme.of(context).textTheme.headlineSmall
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 12.0),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.person_outline,
+                              size: 18,
+                              color: Colors.grey,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              widget.project['full_name'] ?? 'Автор не указан',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16.0),
+                        Text(
+                          widget.project['description'] ??
+                              'Описание отсутствует.',
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                        const SizedBox(height: 24.0),
+                        const Divider(),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8.0),
+                          child: Text(
+                            'Галерея проекта',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 12.0),
-
-                // Автор проекта
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.person_outline,
-                      size: 18,
-                      color: Colors.grey,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      author?['full_name'] ?? 'Автор не указан',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24.0),
-
-                // Разделитель
-                const Divider(),
-                const SizedBox(height: 16.0),
-
-                // Полное описание
-                Text(
-                  'Описание проекта',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 8.0),
-                Text(
-                  project['description'] ?? 'Описание отсутствует.',
-                  style: Theme.of(context).textTheme.bodyLarge,
+                FutureBuilder<List<Map<String, dynamic>>>(
+                  future: _imagesFuture,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const SliverToBoxAdapter(
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+                    if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                      return const SliverToBoxAdapter(
+                        child: Center(child: Text('Изображения не найдены.')),
+                      );
+                    }
+                    final images = snapshot.data!;
+                    return SliverList(
+                      delegate: SliverChildBuilderDelegate((context, index) {
+                        final imageUrl = images[index]['image_url'];
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16.0,
+                            vertical: 8.0,
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.network(
+                              imageUrl,
+                              fit: BoxFit.cover,
+                              loadingBuilder:
+                                  (context, child, loadingProgress) {
+                                    if (loadingProgress == null) return child;
+                                    return const AspectRatio(
+                                      aspectRatio: 16 / 9,
+                                      child: Center(
+                                        child: CircularProgressIndicator(),
+                                      ),
+                                    );
+                                  },
+                              errorBuilder: (context, error, stackTrace) =>
+                                  const AspectRatio(
+                                    aspectRatio: 16 / 9,
+                                    child: Center(
+                                      child: Icon(Icons.broken_image, size: 40),
+                                    ),
+                                  ),
+                            ),
+                          ),
+                        );
+                      }, childCount: images.length),
+                    );
+                  },
                 ),
               ],
             ),
-          ),
-        ],
-      ),
     );
   }
 }

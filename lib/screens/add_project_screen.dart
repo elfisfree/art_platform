@@ -1,5 +1,4 @@
 import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -8,7 +7,6 @@ final supabase = Supabase.instance.client;
 
 class AddProjectScreen extends StatefulWidget {
   const AddProjectScreen({super.key});
-
   @override
   State<AddProjectScreen> createState() => _AddProjectScreenState();
 }
@@ -18,70 +16,92 @@ class _AddProjectScreenState extends State<AddProjectScreen> {
   final _descriptionController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
+  List<XFile> _selectedImages = [];
 
-  // Переменная для хранения выбранного файла изображения
-  XFile? _selectedImage;
-
-  // Функция для выбора изображения из галереи
-  Future<void> _pickImage() async {
-    final imagePicker = ImagePicker();
-    final image = await imagePicker.pickImage(source: ImageSource.gallery);
-
-    if (image != null) {
+  Future<void> _pickImages() async {
+    final images = await ImagePicker().pickMultiImage();
+    if (images.isNotEmpty) {
       setState(() {
-        _selectedImage = image;
+        _selectedImages.addAll(images);
       });
     }
   }
 
-  // Основная функция публикации проекта
   Future<void> _publishProject() async {
-    // Проверяем, что форма заполнена и изображение выбрано
-    if (!_formKey.currentState!.validate() || _selectedImage == null) {
-      if (_selectedImage == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Пожалуйста, выберите изображение проекта'),
+    if (!_formKey.currentState!.validate() || _selectedImages.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Пожалуйста, заполните все поля и выберите хотя бы одно изображение',
           ),
-        );
-      }
+        ),
+      );
       return;
     }
-
     setState(() {
       _isLoading = true;
     });
 
     try {
-      final userId = supabase.auth.currentUser!.id;
-      final file = File(_selectedImage!.path);
-      final fileExtension = _selectedImage!.path.split('.').last;
-      // Создаем уникальное имя файла: user_id/текущее_время.расширение
-      final filePath =
-          '$userId/${DateTime.now().toIso8601String()}.$fileExtension';
+      final user = supabase.auth.currentUser!;
+      final userId = user.id;
 
-      // 1. Загружаем изображение в Supabase Storage
-      await supabase.storage.from('project_images').upload(filePath, file);
+      // 1. Создаем проект
+      final newProject = await supabase
+          .from('projects')
+          .insert({
+            'title': _titleController.text.trim(),
+            'description': _descriptionController.text.trim(),
+            'user_id': userId,
+          })
+          .select()
+          .single();
 
-      // 2. Получаем публичную ссылку на загруженное изображение
-      final imageUrl = supabase.storage
-          .from('project_images')
-          .getPublicUrl(filePath);
+      final projectId = newProject['id'];
+      String? coverImageUrl;
 
-      // 3. Сохраняем данные проекта в таблицу 'projects'
-      await supabase.from('projects').insert({
-        'title': _titleController.text.trim(),
-        'description': _descriptionController.text.trim(),
-        'image_url': imageUrl,
-        'user_id': userId,
-      });
+      // 2. Загружаем картинки
+      for (int i = 0; i < _selectedImages.length; i++) {
+        final image = _selectedImages[i];
+        final file = File(image.path);
+        final fileExtension = image.path.split('.').last;
+        final filePath =
+            '$userId/$projectId/${DateTime.now().millisecondsSinceEpoch}_$i.$fileExtension';
+
+        await supabase.storage.from('project_images').upload(filePath, file);
+        final imageUrl = supabase.storage
+            .from('project_images')
+            .getPublicUrl(filePath);
+
+        await supabase.from('project_images').insert({
+          'project_id': projectId,
+          'image_url': imageUrl,
+        });
+
+        coverImageUrl ??= imageUrl;
+      }
+
+      // 3. Обновляем проект, добавляя обложку
+      final updatedProject = await supabase
+          .from('projects')
+          .update({'cover_image_url': coverImageUrl})
+          .eq('id', projectId)
+          .select()
+          .single();
+
+      // 4. СОЗДАЕМ ОБЪЕКТ ДЛЯ ВОЗВРАТА ВРУЧНУЮ
+      // Мы берем все данные из обновленного проекта
+      // и добавляем full_name из уже известного нам пользователя
+      final Map<String, dynamic> projectToReturn = {
+        ...updatedProject,
+        'full_name': user.userMetadata?['full_name'] ?? '',
+      };
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Проект успешно опубликован!')),
         );
-        // Возвращаемся на предыдущий экран
-        Navigator.of(context).pop(true);
+        Navigator.of(context).pop(projectToReturn);
       }
     } catch (e) {
       if (mounted) {
@@ -100,6 +120,7 @@ class _AddProjectScreenState extends State<AddProjectScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // BUILD МЕТОД ОСТАЕТСЯ БЕЗ ИЗМЕНЕНИЙ
     return Scaffold(
       appBar: AppBar(title: const Text('Добавить новый проект')),
       body: Form(
@@ -107,52 +128,63 @@ class _AddProjectScreenState extends State<AddProjectScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16.0),
           children: [
-            // === Блок выбора изображения ===
-            InkWell(
-              onTap: _pickImage,
-              child: Container(
-                height: 200,
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey),
-                  borderRadius: BorderRadius.circular(8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
                 ),
-                child: _selectedImage != null
-                    // Если изображение выбрано, показываем его
-                    ? Image.file(File(_selectedImage!.path), fit: BoxFit.cover)
-                    // Если нет - показываем приглашение
-                    : const Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.add_a_photo_outlined,
-                            size: 40,
-                            color: Colors.grey,
+                itemCount: _selectedImages.length + 1,
+                itemBuilder: (context, index) {
+                  if (index == _selectedImages.length) {
+                    return InkWell(
+                      onTap: _pickImages,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: Colors.grey.shade400,
+                            style: BorderStyle.solid,
                           ),
-                          SizedBox(height: 8),
-                          Text('Нажмите, чтобы выбрать фото'),
-                        ],
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.add_a_photo_outlined,
+                          color: Colors.grey,
+                        ),
                       ),
+                    );
+                  }
+                  return Image.file(
+                    File(_selectedImages[index].path),
+                    fit: BoxFit.cover,
+                  );
+                },
               ),
             ),
             const SizedBox(height: 24),
-            // === Поля для ввода текста ===
             TextFormField(
               controller: _titleController,
               decoration: const InputDecoration(labelText: 'Название проекта'),
-              validator: (value) =>
-                  value!.isEmpty ? 'Название не может быть пустым' : null,
+              validator: (v) =>
+                  v!.isEmpty ? 'Название не может быть пустым' : null,
             ),
             const SizedBox(height: 16),
             TextFormField(
               controller: _descriptionController,
               decoration: const InputDecoration(labelText: 'Описание проекта'),
               maxLines: 4,
-              validator: (value) =>
-                  value!.isEmpty ? 'Описание не может быть пустым' : null,
+              validator: (v) =>
+                  v!.isEmpty ? 'Описание не может быть пустым' : null,
             ),
             const SizedBox(height: 24),
-            // === Кнопка публикации ===
             _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : ElevatedButton(

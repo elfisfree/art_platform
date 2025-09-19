@@ -13,121 +13,120 @@ class PortfolioScreen extends StatefulWidget {
 }
 
 class _PortfolioScreenState extends State<PortfolioScreen> {
-  late Future<List<Map<String, dynamic>>?> _projectsFuture;
+  // === ИЗМЕНЕНИЕ 1: Убираем Future, работаем с обычным списком и состоянием загрузки ===
+  List<Map<String, dynamic>> _projects = [];
+  bool _isLoading = true;
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
-    _projectsFuture = _getProjects();
+    _getInitialProjects();
   }
 
-  Future<List<Map<String, dynamic>>?> _getProjects() async {
+  Future<void> _getInitialProjects() async {
     try {
-      // Выбираем все проекты и из связанной таблицы users берем full_name
       final data = await supabase
-          .from('projects')
-          .select('*, users(full_name)')
-          .order('created_at', ascending: false); // Новые проекты сверху
-      return data;
+          .from('projects_with_authors')
+          .select('*')
+          .order('created_at', ascending: false);
+
+      setState(() {
+        _projects = List<Map<String, dynamic>>.from(data);
+        _isLoading = false;
+      });
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Ошибка загрузки проектов: $e')));
-      }
-      return null;
+      setState(() {
+        _errorMessage = 'Ошибка загрузки проектов: $e';
+        _isLoading = false;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Используем FutureBuilder для асинхронной загрузки
-      body: FutureBuilder<List<Map<String, dynamic>>?>(
-        future: _projectsFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError || snapshot.data == null) {
-            return const Center(child: Text('Не удалось загрузить проекты'));
-          }
-          final projects = snapshot.data!;
-          if (projects.isEmpty) {
-            return const Center(
-              child: Text('Пока не добавлено ни одного проекта'),
-            );
-          }
+      // === ИЗМЕНЕНИЕ 2: Убираем FutureBuilder, используем простую логику отображения ===
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _errorMessage != null
+          ? Center(child: Text(_errorMessage!))
+          : _projects.isEmpty
+          ? const Center(child: Text('Пока не добавлено ни одного проекта'))
+          : GridView.builder(
+              padding: const EdgeInsets.all(8.0),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 8.0,
+                mainAxisSpacing: 8.0,
+                childAspectRatio: 0.8,
+              ),
+              itemCount: _projects.length,
+              itemBuilder: (context, index) {
+                final project = _projects[index];
+                final imageUrl = project['cover_image_url'];
 
-          // Используем GridView для отображения сетки
-          return GridView.builder(
-            padding: const EdgeInsets.all(8.0),
-            // Указываем, что в сетке будет 2 колонки
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: 8.0,
-              mainAxisSpacing: 8.0,
-              childAspectRatio: 0.8, // Соотношение сторон карточки
-            ),
-            itemCount: projects.length,
-            itemBuilder: (context, index) {
-              final project = projects[index];
-              final author = project['users'];
-              final imageUrl = project['image_url'];
-
-              return Card(
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  // === ЗАМЕНЯЕМ ЭТОТ БЛОК ===
-                  onTap: () {
-                    // Логика перехода на новый экран
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        // Создаем экземпляр ProjectDetailsScreen и передаем ему данные
-                        builder: (context) =>
-                            ProjectDetailsScreen(project: project),
-                      ),
-                    );
-                  },
-                  // === КОНЕЦ БЛОКА ДЛЯ ЗАМЕНЫ ===
-                  child: GridTile(
-                    footer: Container(
-                      padding: const EdgeInsets.all(8.0),
-                      color: Colors.black.withOpacity(0.6),
-                      child: Text(
-                        project['title'] ?? 'Без названия',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
+                return Card(
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    // === ВОТ ПРАВИЛЬНЫЙ КОД ДЛЯ onTap ===
+                    onTap: () async {
+                      // Логика перехода на экран деталей
+                      final result = await Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              ProjectDetailsScreen(project: project),
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                      );
+
+                      // Эта логика для обновления после удаления, она нам еще понадобится
+                      if (result == true) {
+                        setState(() {
+                          // Это вызовет ошибку, если _getInitialProjects не объявлен.
+                          // Убедитесь, что _getInitialProjects существует в вашем классе _PortfolioScreenState.
+                          _getInitialProjects();
+                        });
+                      }
+                    },
+                    // ===================================
+                    child: GridTile(
+                      footer: Container(
+                        padding: const EdgeInsets.all(8.0),
+                        color: Colors.black.withOpacity(0.6),
+                        child: Text(
+                          project['title'] ?? 'Без названия',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
+                      child: (imageUrl != null && imageUrl.isNotEmpty)
+                          ? Image.network(
+                              imageUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) =>
+                                  const Center(child: Icon(Icons.broken_image)),
+                            )
+                          : Container(color: Colors.grey[800]),
                     ),
-                    child: (imageUrl != null && imageUrl.isNotEmpty)
-                        ? Image.network(
-                            imageUrl,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) =>
-                                const Center(child: Icon(Icons.broken_image)),
-                          )
-                        : Container(color: Colors.grey[800]),
                   ),
-                ),
-              );
-            },
-          );
-        },
-      ),
-      // Плавающая кнопка для добавления нового проекта
+                );
+              },
+            ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
-          final result = await Navigator.of(context).push(
+          // === ИЗМЕНЕНИЕ 3: Ждем не true, а сам объект проекта ===
+          final newProject = await Navigator.of(context).push(
             MaterialPageRoute(builder: (context) => const AddProjectScreen()),
           );
-          if (result == true && mounted) {
+
+          // Если вернулся новый проект, добавляем его в начало списка
+          if (newProject != null && newProject is Map<String, dynamic>) {
             setState(() {
-              _projectsFuture = _getProjects();
+              _projects.insert(0, newProject);
             });
           }
         },

@@ -1,5 +1,4 @@
 import 'package:art_platform/screens/event_details_screen.dart';
-import 'package:art_platform/screens/login_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -9,192 +8,251 @@ class EventsListScreen extends StatefulWidget {
   const EventsListScreen({super.key});
 
   @override
-  State<EventsListScreen> createState() => _HomeScreenState();
+  State<EventsListScreen> createState() => _EventsListScreenState();
 }
 
-class _HomeScreenState extends State<EventsListScreen> {
-  late final Future<List<Map<String, dynamic>>?> _eventsFuture;
+class _EventsListScreenState extends State<EventsListScreen> {
+  // === НОВЫЕ ПЕРЕМЕННЫЕ СОСТОЯНИЯ ===
+  List<Map<String, dynamic>> _events = [];
+  List<Map<String, dynamic>> _eventTypes = [];
+  int? _selectedTypeId; // null будет означать "Все типы"
+  bool _isLoading = true;
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
-    _eventsFuture = _getEvents();
+    _fetchInitialData();
   }
 
-  Future<List<Map<String, dynamic>>?> _getEvents() async {
-    // ... (эта функция остается без изменений) ...
+  // Функция для первоначальной загрузки и типов, и всех событий
+  Future<void> _fetchInitialData() async {
     try {
-      final data = await supabase
-          .from('events')
-          .select('*, event_type(type_name)')
-          .order('start_date', ascending: true);
-      return data;
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Ошибка загрузки мероприятий: $error'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
-      }
-      return null;
+      // Выполняем оба запроса параллельно для скорости
+      final responses = await Future.wait([
+        supabase.from('event_type').select('id, type_name'),
+        supabase
+            .from('events')
+            .select('*, event_type(type_name)')
+            .order('start_date', ascending: true),
+      ]);
+
+      setState(() {
+        _eventTypes = List<Map<String, dynamic>>.from(responses[0]);
+        _events = List<Map<String, dynamic>>.from(responses[1]);
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Ошибка загрузки данных: $e';
+        _isLoading = false;
+      });
     }
   }
 
-  Future<void> _signOut() async {
-    // ... (эта функция остается без изменений) ...
-    await supabase.auth.signOut();
-    if (mounted) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const LoginScreen()),
-      );
+  // Функция для загрузки событий с учетом выбранного фильтра
+  Future<void> _fetchFilteredEvents() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+    try {
+      // Начинаем строить запрос
+      var query = supabase.from('events').select('*, event_type(type_name)');
+
+      // Если выбран конкретный тип, добавляем фильтр .eq()
+      if (_selectedTypeId != null) {
+        query = query.eq('event_type', _selectedTypeId!);
+      }
+
+      // Сортируем и выполняем запрос
+      final data = await query.order('start_date', ascending: true);
+
+      setState(() {
+        _events = List<Map<String, dynamic>>.from(data);
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Ошибка загрузки мероприятий: $e';
+        _isLoading = false;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: FutureBuilder<List<Map<String, dynamic>>?>(
-        future: _eventsFuture,
-        builder: (context, snapshot) {
-          // ... (логика загрузки, ошибок и пустого списка остается без изменений) ...
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError || snapshot.data == null) {
-            return const Center(child: Text('Не удалось загрузить данные'));
-          }
-          final events = snapshot.data!;
-          if (events.isEmpty) {
-            return const Center(child: Text('Предстоящих мероприятий нет'));
-          }
+    // Вся логика отображения теперь зависит от переменных состояния
+    if (_isLoading && _events.isEmpty) {
+      // Показываем главный индикатор только при первой загрузке
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_errorMessage != null) {
+      return Center(child: Text(_errorMessage!));
+    }
 
-          // === НАЧАЛО ОБНОВЛЕННОЙ ВЕРСТКИ ===
-          return ListView.builder(
-            padding: const EdgeInsets.all(12.0),
-            itemCount: events.length,
-            itemBuilder: (context, index) {
-              final event = events[index];
-              final eventType = event['event_type'];
-              final imageUrl = event['cover_image_url'];
+    return Column(
+      children: [
+        // === НОВЫЙ БЛОК: ВЫПАДАЮЩИЙ СПИСОК ДЛЯ ФИЛЬТРАЦИИ ===
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+          child: DropdownButtonFormField<int?>(
+            value: _selectedTypeId,
+            hint: const Text('Фильтр по типу'),
+            isExpanded: true,
+            decoration: InputDecoration(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12.0),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8.0),
+              ),
+            ),
+            // Формируем список элементов для выбора
+            items: [
+              // Добавляем вручную пункт "Все типы"
+              const DropdownMenuItem<int?>(
+                value: null,
+                child: Text('Все типы'),
+              ),
+              // Динамически создаем остальные пункты из загруженных данных
+              ..._eventTypes.map<DropdownMenuItem<int?>>((type) {
+                return DropdownMenuItem<int?>(
+                  value: type['id'] as int,
+                  child: Text(type['type_name'] as String),
+                );
+              }).toList(),
+            ],
+            onChanged: (int? newValue) {
+              setState(() {
+                _selectedTypeId = newValue;
+              });
+              // Запускаем перезагрузку списка с новым фильтром
+              _fetchFilteredEvents();
+            },
+          ),
+        ),
 
-              return Card(
-                clipBehavior: Clip.antiAlias,
-                margin: const EdgeInsets.only(bottom: 16.0),
-                // Устанавливаем форму с закругленными углами
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: InkWell(
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (context) => EventDetailsScreen(event: event),
+        // === СПИСОК МЕРОПРИЯТИЙ ===
+        // Expanded нужен, чтобы ListView занял все оставшееся место в Column
+        Expanded(
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : _events.isEmpty
+              ? const Center(
+                  child: Text('Мероприятий по вашему фильтру не найдено'),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.all(12.0),
+                  itemCount: _events.length,
+                  itemBuilder: (context, index) {
+                    final event = _events[index];
+                    final eventType = event['event_type'];
+                    final imageUrl = event['cover_image_url'];
+
+                    // Карточка мероприятия остается без изменений
+                    return Card(
+                      clipBehavior: Clip.antiAlias,
+                      margin: const EdgeInsets.only(bottom: 16.0),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                    );
-                  },
-                  // Используем Stack, чтобы наложить виджеты друг на друга
-                  child: Stack(
-                    // Выравниваем текст по нижнему краю
-                    alignment: Alignment.bottomLeft,
-                    children: [
-                      // Слой 1: Изображение
-                      // Оборачиваем в SizedBox, чтобы задать фиксированную высоту карточке
-                      SizedBox(
-                        height: 200,
-                        child: (imageUrl != null && imageUrl.isNotEmpty)
-                            ? Image.network(
-                                imageUrl,
-                                width: double.infinity,
-                                fit: BoxFit
-                                    .cover, // BoxFit.cover теперь работает идеально
-                                errorBuilder: (context, error, stackTrace) =>
-                                    const Center(
-                                      child: Icon(
-                                        Icons.image_not_supported_outlined,
-                                        size: 40,
-                                      ),
-                                    ),
-                              )
-                            : Container(
-                                color: Colors.grey[800],
-                              ), // Заглушка, если нет картинки
-                      ),
-
-                      // Слой 2: Градиент для затемнения нижней части изображения
-                      // Это нужно, чтобы белый текст всегда был читаемым
-                      Container(
-                        height: 200,
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [Colors.black, Colors.transparent],
-                            begin: Alignment.bottomCenter,
-                            end: Alignment.center,
-                          ),
-                        ),
-                      ),
-
-                      // Слой 3: Текст
-                      Padding(
-                        padding: const EdgeInsets.all(12.0),
-                        child: Column(
-                          // Выравниваем текст по левому краю
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          // mainAxisSize.min чтобы колонка не занимала всю высоту стека
-                          mainAxisSize: MainAxisSize.min,
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (context) =>
+                                  EventDetailsScreen(event: event),
+                            ),
+                          );
+                        },
+                        child: Stack(
+                          alignment: Alignment.bottomLeft,
                           children: [
-                            Text(
-                              event['name'] ?? 'Без названия',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
+                            SizedBox(
+                              height: 200,
+                              child: (imageUrl != null && imageUrl.isNotEmpty)
+                                  ? Image.network(
+                                      imageUrl,
+                                      width: double.infinity,
+                                      fit: BoxFit.cover,
+                                      errorBuilder:
+                                          (
+                                            context,
+                                            error,
+                                            stackTrace,
+                                          ) => const Center(
+                                            child: Icon(
+                                              Icons
+                                                  .image_not_supported_outlined,
+                                              size: 40,
+                                            ),
+                                          ),
+                                    )
+                                  : Container(color: Colors.grey[800]),
+                            ),
+                            Container(
+                              height: 200,
+                              decoration: const BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [Colors.black, Colors.transparent],
+                                  begin: Alignment.bottomCenter,
+                                  end: Alignment.center,
+                                ),
                               ),
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${eventType?['type_name'] ?? 'Событие'} | ${event['location'] ?? 'Место не указано'}',
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 14,
+                            Padding(
+                              padding: const EdgeInsets.all(12.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    event['name'] ?? 'Без названия',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '${eventType?['type_name'] ?? 'Событие'} | ${event['location'] ?? 'Место не указано'}',
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Positioned(
+                              top: 8,
+                              right: 8,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.5),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  event['start_date'] ?? '',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                  ),
+                                ),
                               ),
                             ),
                           ],
                         ),
                       ),
-
-                      // Слой 4: Дата (позиционируем в правом верхнем углу)
-                      Positioned(
-                        top: 8,
-                        right: 8,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: .5),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            event['start_date'] ?? '',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
-              );
-            },
-          );
-          // === КОНЕЦ ОБНОВЛЕННОЙ ВЕРСТКИ ===
-        },
-      ),
+        ),
+      ],
     );
   }
 }

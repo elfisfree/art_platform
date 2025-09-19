@@ -32,7 +32,6 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
     }
   }
 
-  // === ФИНАЛЬНАЯ ЛОГИКА УДАЛЕНИЯ ПРЯМО В КОДЕ ===
   Future<void> _deleteProject() async {
     setState(() {
       _isLoading = true;
@@ -40,29 +39,19 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
 
     try {
       final projectId = widget.project['id'];
-
-      // 1. Получаем список всех URL изображений проекта
       final imagesResponse = await supabase
           .from('project_images')
           .select('image_url')
           .eq('project_id', projectId);
-
-      // 2. Извлекаем из URL пути к файлам
       final List<String> pathsToDelete = [];
       for (final image in imagesResponse) {
         final imageUrl = image['image_url'];
-        // Надежный способ извлечь путь из URL
         final path = Uri.parse(imageUrl).pathSegments.sublist(5).join('/');
         pathsToDelete.add(path);
       }
-
-      // 3. Если есть что удалять, удаляем файлы из Storage
       if (pathsToDelete.isNotEmpty) {
         await supabase.storage.from('project_images').remove(pathsToDelete);
       }
-
-      // 4. Удаляем саму запись о проекте из базы данных.
-      // ON DELETE CASCADE автоматически удалит все записи из 'project_images'.
       await supabase.from('projects').delete().match({'id': projectId});
 
       if (mounted) {
@@ -84,7 +73,6 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
   }
 
   void _showDeleteConfirmationDialog() {
-    // ... (этот метод остается без изменений) ...
     showDialog(
       context: context,
       builder: (BuildContext dialogContext) {
@@ -115,7 +103,6 @@ class _ProjectDetailsScreenState extends State<ProjectDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // ... (build метод остается без изменений) ...
     final currentUserId = supabase.auth.currentUser!.id;
     final isAuthor = currentUserId == widget.project['user_id'];
 

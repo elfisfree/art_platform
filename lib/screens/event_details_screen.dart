@@ -1,3 +1,5 @@
+// ignore_for_file: curly_braces_in_flow_control_structures
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -15,29 +17,25 @@ class EventDetailsScreen extends StatefulWidget {
 class _EventDetailsScreenState extends State<EventDetailsScreen> {
   bool _isLoading = true;
   bool _isRegistered = false;
-  int _registrationCount = 0; // === НОВОЕ: Переменная для счетчика ===
+  int _registrationCount = 0;
 
   @override
   void initState() {
     super.initState();
-    _fetchInitialData(); // Загружаем все данные при старте
+    _fetchInitialData();
   }
 
-  // === НОВОЕ: Объединенная функция загрузки данных ===
   Future<void> _fetchInitialData() async {
     final userId = supabase.auth.currentUser!.id;
     final eventId = widget.event['id'];
 
     try {
-      // Выполняем оба запроса одновременно
       final responses = await Future.wait([
-        // Запрос 1: Статус регистрации
         supabase
             .from('event_users')
             .select()
             .eq('user_id', userId)
             .eq('event_id', eventId),
-        // Запрос 2: Количество участников через RPC
         supabase.rpc(
           'get_event_registrations_count',
           params: {'p_event_id': eventId},
@@ -65,7 +63,6 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
   }
 
   Future<void> _toggleRegistration() async {
-    // ... (этот метод остается без изменений, но мы добавим обновление счетчика)
     setState(() {
       _isLoading = true;
     });
@@ -79,14 +76,13 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
           'user_id': userId,
           'event_id': eventId,
         });
-        if (mounted) setState(() => _registrationCount--); // Уменьшаем счетчик
+        if (mounted) setState(() => _registrationCount--);
       } else {
         await supabase.from('event_users').insert({
           'user_id': userId,
           'event_id': eventId,
         });
-        if (mounted)
-          setState(() => _registrationCount++); // Увеличиваем счетчик
+        if (mounted) setState(() => _registrationCount++);
       }
 
       if (mounted) {
@@ -115,9 +111,8 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(widget.event['name'] ?? 'Детали события')),
       body: ListView(
-        padding: const EdgeInsets.all(0), // Убираем отступы у ListView
+        padding: const EdgeInsets.all(0),
         children: [
-          // === НОВОЕ: Большое изображение ===
           if (imageUrl != null && imageUrl.isNotEmpty)
             Image.network(
               imageUrl,
@@ -129,8 +124,6 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                 child: Center(child: Icon(Icons.hide_image_outlined, size: 50)),
               ),
             ),
-
-          // Контент с отступами
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Column(
@@ -143,8 +136,6 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                   ),
                 ),
                 const SizedBox(height: 16.0),
-
-                // === НОВОЕ: Отображение счетчика ===
                 Row(
                   children: [
                     const Icon(Icons.people_outline, size: 16),
@@ -204,10 +195,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                       backgroundColor: _isRegistered
                           ? Colors.grey
                           : Theme.of(context).primaryColor,
-                      minimumSize: const Size(
-                        double.infinity,
-                        48,
-                      ), // Кнопка на всю ширину
+                      minimumSize: const Size(double.infinity, 48),
                     ),
                     child: Text(
                       _isRegistered

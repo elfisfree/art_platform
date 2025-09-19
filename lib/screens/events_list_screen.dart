@@ -12,10 +12,9 @@ class EventsListScreen extends StatefulWidget {
 }
 
 class _EventsListScreenState extends State<EventsListScreen> {
-  // === НОВЫЕ ПЕРЕМЕННЫЕ СОСТОЯНИЯ ===
   List<Map<String, dynamic>> _events = [];
   List<Map<String, dynamic>> _eventTypes = [];
-  int? _selectedTypeId; // null будет означать "Все типы"
+  int? _selectedTypeId;
   bool _isLoading = true;
   String? _errorMessage;
 
@@ -25,10 +24,8 @@ class _EventsListScreenState extends State<EventsListScreen> {
     _fetchInitialData();
   }
 
-  // Функция для первоначальной загрузки и типов, и всех событий
   Future<void> _fetchInitialData() async {
     try {
-      // Выполняем оба запроса параллельно для скорости
       final responses = await Future.wait([
         supabase.from('event_type').select('id, type_name'),
         supabase
@@ -50,22 +47,16 @@ class _EventsListScreenState extends State<EventsListScreen> {
     }
   }
 
-  // Функция для загрузки событий с учетом выбранного фильтра
   Future<void> _fetchFilteredEvents() async {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
     try {
-      // Начинаем строить запрос
       var query = supabase.from('events').select('*, event_type(type_name)');
-
-      // Если выбран конкретный тип, добавляем фильтр .eq()
       if (_selectedTypeId != null) {
         query = query.eq('event_type', _selectedTypeId!);
       }
-
-      // Сортируем и выполняем запрос
       final data = await query.order('start_date', ascending: true);
 
       setState(() {
@@ -82,9 +73,7 @@ class _EventsListScreenState extends State<EventsListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Вся логика отображения теперь зависит от переменных состояния
     if (_isLoading && _events.isEmpty) {
-      // Показываем главный индикатор только при первой загрузке
       return const Center(child: CircularProgressIndicator());
     }
     if (_errorMessage != null) {
@@ -93,7 +82,6 @@ class _EventsListScreenState extends State<EventsListScreen> {
 
     return Column(
       children: [
-        // === НОВЫЙ БЛОК: ВЫПАДАЮЩИЙ СПИСОК ДЛЯ ФИЛЬТРАЦИИ ===
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
           child: DropdownButtonFormField<int?>(
@@ -106,14 +94,11 @@ class _EventsListScreenState extends State<EventsListScreen> {
                 borderRadius: BorderRadius.circular(8.0),
               ),
             ),
-            // Формируем список элементов для выбора
             items: [
-              // Добавляем вручную пункт "Все типы"
               const DropdownMenuItem<int?>(
                 value: null,
                 child: Text('Все типы'),
               ),
-              // Динамически создаем остальные пункты из загруженных данных
               ..._eventTypes.map<DropdownMenuItem<int?>>((type) {
                 return DropdownMenuItem<int?>(
                   value: type['id'] as int,
@@ -125,14 +110,10 @@ class _EventsListScreenState extends State<EventsListScreen> {
               setState(() {
                 _selectedTypeId = newValue;
               });
-              // Запускаем перезагрузку списка с новым фильтром
               _fetchFilteredEvents();
             },
           ),
         ),
-
-        // === СПИСОК МЕРОПРИЯТИЙ ===
-        // Expanded нужен, чтобы ListView занял все оставшееся место в Column
         Expanded(
           child: _isLoading
               ? const Center(child: CircularProgressIndicator())
@@ -147,8 +128,6 @@ class _EventsListScreenState extends State<EventsListScreen> {
                     final event = _events[index];
                     final eventType = event['event_type'];
                     final imageUrl = event['cover_image_url'];
-
-                    // Карточка мероприятия остается без изменений
                     return Card(
                       clipBehavior: Clip.antiAlias,
                       margin: const EdgeInsets.only(bottom: 16.0),
@@ -233,7 +212,7 @@ class _EventsListScreenState extends State<EventsListScreen> {
                                   vertical: 4,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: Colors.black.withOpacity(0.5),
+                                  color: Colors.black.withValues(alpha: .5),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Text(

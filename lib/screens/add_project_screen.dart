@@ -1,3 +1,5 @@
+// ignore_for_file: prefer_final_fields
+
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -45,8 +47,6 @@ class _AddProjectScreenState extends State<AddProjectScreen> {
     try {
       final user = supabase.auth.currentUser!;
       final userId = user.id;
-
-      // 1. Создаем проект
       final newProject = await supabase
           .from('projects')
           .insert({
@@ -59,8 +59,6 @@ class _AddProjectScreenState extends State<AddProjectScreen> {
 
       final projectId = newProject['id'];
       String? coverImageUrl;
-
-      // 2. Загружаем картинки
       for (int i = 0; i < _selectedImages.length; i++) {
         final image = _selectedImages[i];
         final file = File(image.path);
@@ -80,8 +78,6 @@ class _AddProjectScreenState extends State<AddProjectScreen> {
 
         coverImageUrl ??= imageUrl;
       }
-
-      // 3. Обновляем проект, добавляя обложку
       final updatedProject = await supabase
           .from('projects')
           .update({'cover_image_url': coverImageUrl})
@@ -89,9 +85,6 @@ class _AddProjectScreenState extends State<AddProjectScreen> {
           .select()
           .single();
 
-      // 4. СОЗДАЕМ ОБЪЕКТ ДЛЯ ВОЗВРАТА ВРУЧНУЮ
-      // Мы берем все данные из обновленного проекта
-      // и добавляем full_name из уже известного нам пользователя
       final Map<String, dynamic> projectToReturn = {
         ...updatedProject,
         'full_name': user.userMetadata?['full_name'] ?? '',
@@ -120,7 +113,6 @@ class _AddProjectScreenState extends State<AddProjectScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // BUILD МЕТОД ОСТАЕТСЯ БЕЗ ИЗМЕНЕНИЙ
     return Scaffold(
       appBar: AppBar(title: const Text('Добавить новый проект')),
       body: Form(
